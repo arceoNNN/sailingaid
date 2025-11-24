@@ -62,13 +62,61 @@ function getTargetVMG(tws, mode) {
   return null;
 }
 
+// Get target boat speed at given TWS and TWA using full polar table
+function getTargetBoatSpeed(tws, twa) {
+  if (!polars || !polars.angles || !polars.speeds) return null;
+
+  const twsList = polars.tws;
+  const angles = polars.angles;
+  const speeds = polars.speeds;
+
+  if (!Array.isArray(twsList) || twsList.length === 0 ||
+      !Array.isArray(angles) || angles.length === 0) {
+    return null;
+  }
+
+  // Clamp TWA to [minAngle, maxAngle]
+  let ang = Math.abs(twa);
+  if (ang > 180) ang = 360 - ang;
+  const minA = angles[0];
+  const maxA = angles[angles.length - 1];
+  if (ang <= minA) ang = minA;
+  if (ang >= maxA) ang = maxA;
+
+  // Find angle bracket
+  let a0 = angles[0], a1 = angles[angles.length - 1];
+  for (let i = 0; i < angles.length - 1; i++) {
+    if (ang >= angles[i] && ang <= angles[i + 1]) {
+      a0 = angles[i];
+      a1 = angles[i + 1];
+      break;
+    }
+  }
+
+  const arrA0 = speeds[String(a0)];
+  const arrA1 = speeds[String(a1)];
+  if (!arrA0 || !arrA1) return null;
+
+  // Interpolate in TWS dimension for each bounding angle
+  const spA0 = interp1(tws, twsList, arrA0);
+  const spA1 = interp1(tws, twsList, arrA1);
+  if (spA0 == null || spA1 == null) return null;
+
+  if (a1 === a0) return spA0;
+
+  // Interpolate in angle dimension
+  const t = (ang - a0) / (a1 - a0);
+  return spA0 + t * (spA1 - spA0);
+}
+
 function startTracking() {
+  if (!navigator.geolocation) {
+    document.getElementById('gpsStatus').textContent = 'Requesting GPS...';
+
   if (!navigator.geolocation) {
     document.getElementById('gpsStatus').textContent = 'GPS not supported';
     return;
   }
-
-  document.getElementById('gpsStatus').textContent = 'Requesting GPS...';
 
   // Ask for freshest possible GPS data; real rate still depends on hardware/OS
   watchId = navigator.geolocation.watchPosition(onPosition, onError, {
@@ -101,12 +149,15 @@ function updateLive(lat, lon, sog, cmg) {
   // Heading & speed directly from GPS
   const headingInfo = document.getElementById('headingInfo');
   const speedInfo = document.getElementById('speedInfo');
+  const twaInfo = document.getElementById('twaInfo');
 
   headingInfo.textContent =
     `Heading (CMG): ${cmg != null ? cmg.toFixed(0) + '°' : '–'}`;
 
   speedInfo.textContent =
     `Speed over ground: ${sog != null ? sog.toFixed(2) + ' kt' : '–'}`;
+
+  // We'll fill TWA later once we know windDir
 
   // Mark info & VMG to mark
   const markLat = parseFloat(document.getElementById('markLat').value);
@@ -137,32 +188,42 @@ function updateLive(lat, lon, sog, cmg) {
     vmgMarkInfo.textContent = 'VMG to mark: –';
   }
 
-  // VMG vs wind using polars
+  // VMG vs wind using polars & speed vs polar
   const vmgInfo = document.getElementById('vmgInfo');
+  const speedPolarInfo = document.getElementById('speedPolarInfo');
+
   const windDirVal = parseFloat(document.getElementById('windDir').value);
   const twsVal = parseFloat(document.getElementById('tws').value);
 
   // Reset colour classes
   vmgInfo.classList.remove('perf-good', 'perf-ok', 'perf-bad');
+  speedPolarInfo.classList.remove('perf-good', 'perf-ok', 'perf-bad');
 
   if (!isFinite(windDirVal) || !isFinite(twsVal) || sog == null || cmg == null) {
     vmgInfo.textContent = 'VMG vs wind: waiting for wind, TWS and GPS...';
+    speedPolarInfo.textContent = 'Speed vs polar: waiting for wind, TWS and GPS...';
+    twaInfo.textContent = 'TWA: –';
     return;
   }
 
   const windDir = ((windDirVal % 360) + 360) % 360;
 
-  // Upwind vs downwind determination
-  const diffToUp = smallestAngleDiff(cmg, windDir);
-  const absUp = Math.abs(diffToUp);
+  // Compute TWA (0..180)
+  let rawDiff = smallestAngleDiff(cmg, windDir); // -180..180
+  let twa = Math.abs(rawDiff);
+  if (twa > 180) twa = 360 - twa;
+  twaInfo.textContent = `TWA (approx): ${twa.toFixed(0)}°`;
 
-  let mode, vmg, target;
+  // Upwind vs downwind determination for VMG vs wind
+  const absUp = Math.abs(rawDiff);
+
+  let mode, vmg, targetVMG;
 
   if (absUp <= 90) {
     // Upwind sector
     mode = 'upwind';
     vmg = sog * Math.cos(toRad(absUp)); // projection on upwind axis
-    target = getTargetVMG(twsVal, 'upwind');
+    targetVMG = getTargetVMG(twsVal, 'upwind');
   } else {
     // Downwind sector
     const downDir = (windDir + 180) % 360;
@@ -170,25 +231,44 @@ function updateLive(lat, lon, sog, cmg) {
     const absDown = Math.abs(diffToDown);
     mode = 'downwind';
     vmg = sog * Math.cos(toRad(absDown)); // projection on downwind axis
-    target = getTargetVMG(twsVal, 'downwind');
+    targetVMG = getTargetVMG(twsVal, 'downwind');
   }
 
-  if (target && target > 0) {
-    const perf = (vmg / target) * 100;
+  if (targetVMG && targetVMG > 0) {
+    const perfVMG = (vmg / targetVMG) * 100;
     vmgInfo.textContent =
-      `VMG ${mode} vs wind: ${vmg.toFixed(2)} kt (target ${target.toFixed(2)} kt, ${perf.toFixed(0)}%)`;
+      `VMG ${mode} vs wind: ${vmg.toFixed(2)} kt (target ${targetVMG.toFixed(2)} kt, ${perfVMG.toFixed(0)}%)`;
 
-    // Colour coding
-    if (perf >= 95) {
+    if (perfVMG >= 95) {
       vmgInfo.classList.add('perf-good');
-    } else if (perf >= 90) {
+    } else if (perfVMG >= 90) {
       vmgInfo.classList.add('perf-ok');
     } else {
       vmgInfo.classList.add('perf-bad');
     }
   } else {
     vmgInfo.textContent =
-      `VMG ${mode} vs wind: ${vmg.toFixed(2)} kt (no polar data for this TWS yet)`;
+      `VMG ${mode} vs wind: ${vmg.toFixed(2)} kt (no polar VMG data for this TWS yet)`;
+  }
+
+  // Speed vs polar speed at this TWS & TWA
+  const targetSpeed = getTargetBoatSpeed(twsVal, twa);
+
+  if (targetSpeed && targetSpeed > 0) {
+    const perfSpd = (sog / targetSpeed) * 100;
+    speedPolarInfo.textContent =
+      `Speed vs polar: ${sog.toFixed(2)} kt (target ${targetSpeed.toFixed(2)} kt, ${perfSpd.toFixed(0)}%)`;
+
+    if (perfSpd >= 95) {
+      speedPolarInfo.classList.add('perf-good');
+    } else if (perfSpd >= 90) {
+      speedPolarInfo.classList.add('perf-ok');
+    } else {
+      speedPolarInfo.classList.add('perf-bad');
+    }
+  } else {
+    speedPolarInfo.textContent =
+      `Speed vs polar: ${sog != null ? sog.toFixed(2) + ' kt' : '–'} (no polar speed data for this TWS/TWA yet)`;
   }
 }
 
