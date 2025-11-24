@@ -1,3 +1,4 @@
+
 body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   margin: 0;
@@ -23,6 +24,17 @@ label {
   margin-bottom: 0.5rem;
 }
 
+.field-with-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.2rem;
+}
+
+.field-with-buttons input {
+  flex: 1;
+}
+
 input {
   width: 100%;
   padding: 0.4rem;
@@ -31,8 +43,7 @@ input {
 }
 
 button {
-  margin-top: 0.5rem;
-  padding: 0.6rem 1rem;
+  padding: 0.4rem 0.7rem;
   border: none;
   border-radius: 6px;
   background: #0077ff;
@@ -40,6 +51,28 @@ button {
   font-size: 1rem;
 }
 
+#startBtn {
+  margin-top: 0.7rem;
+  padding: 0.6rem 1rem;
+}
+
 p {
   margin: 0.3rem 0;
+}
+
+/* Performance colour coding for VMG vs wind */
+#vmgInfo {
+  font-weight: 600;
+}
+
+.perf-good {
+  color: #008000; /* green */
+}
+
+.perf-ok {
+  color: #c09000; /* amber-ish */
+}
+
+.perf-bad {
+  color: #b00020; /* red */
 }

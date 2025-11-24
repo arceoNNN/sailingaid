@@ -1,3 +1,4 @@
+
 let watchId = null;
 let polars = null; // loaded from polars.json
 
@@ -69,10 +70,11 @@ function startTracking() {
 
   document.getElementById('gpsStatus').textContent = 'Requesting GPS...';
 
+  // Ask for freshest possible GPS data; real rate still depends on hardware/OS
   watchId = navigator.geolocation.watchPosition(onPosition, onError, {
     enableHighAccuracy: true,
-    maximumAge: 1000,
-    timeout: 10000
+    maximumAge: 0,
+    timeout: 5000
   });
 }
 
@@ -140,6 +142,9 @@ function updateLive(lat, lon, sog, cmg) {
   const windDirVal = parseFloat(document.getElementById('windDir').value);
   const twsVal = parseFloat(document.getElementById('tws').value);
 
+  // Reset colour classes
+  vmgInfo.classList.remove('perf-good', 'perf-ok', 'perf-bad');
+
   if (!isFinite(windDirVal) || !isFinite(twsVal) || sog == null || cmg == null) {
     vmgInfo.textContent = 'VMG vs wind: waiting for wind, TWS and GPS...';
     return;
@@ -172,6 +177,15 @@ function updateLive(lat, lon, sog, cmg) {
     const perf = (vmg / target) * 100;
     vmgInfo.textContent =
       `VMG ${mode} vs wind: ${vmg.toFixed(2)} kt (target ${target.toFixed(2)} kt, ${perf.toFixed(0)}%)`;
+
+    // Colour coding
+    if (perf >= 95) {
+      vmgInfo.classList.add('perf-good');
+    } else if (perf >= 90) {
+      vmgInfo.classList.add('perf-ok');
+    } else {
+      vmgInfo.classList.add('perf-bad');
+    }
   } else {
     vmgInfo.textContent =
       `VMG ${mode} vs wind: ${vmg.toFixed(2)} kt (no polar data for this TWS yet)`;
@@ -188,6 +202,26 @@ function loadPolars() {
     .catch(err => {
       console.error('Failed to load polars.json', err);
     });
+}
+
+// +/- helpers for wind direction and TWS
+function adjustWindDir(delta) {
+  const input = document.getElementById('windDir');
+  let val = parseFloat(input.value);
+  if (!isFinite(val)) val = 0;
+  val += delta;
+  // normalize to 0–359
+  val = ((val % 360) + 360) % 360;
+  input.value = val.toFixed(0);
+}
+
+function adjustTWS(delta) {
+  const input = document.getElementById('tws');
+  let val = parseFloat(input.value);
+  if (!isFinite(val)) val = 0;
+  val += delta;
+  if (val < 0) val = 0;
+  input.value = val.toFixed(1);
 }
 
 document.getElementById('startBtn').addEventListener('click', startTracking);

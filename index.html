@@ -12,10 +12,18 @@
   <section id="setup">
     <h2>Setup</h2>
     <label>Wind direction (deg, true):
-      <input id="windDir" type="number" value="0">
+      <div class="field-with-buttons">
+        <button type="button" onclick="adjustWindDir(-1)">−</button>
+        <input id="windDir" type="number" value="0" step="1">
+        <button type="button" onclick="adjustWindDir(1)">+</button>
+      </div>
     </label>
     <label>True wind speed TWS (kt):
-      <input id="tws" type="number" value="10">
+      <div class="field-with-buttons">
+        <button type="button" onclick="adjustTWS(-0.5)">−</button>
+        <input id="tws" type="number" value="10" step="0.5">
+        <button type="button" onclick="adjustTWS(0.5)">+</button>
+      </div>
     </label>
 
     <h3>Next mark</h3>
