@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Sailing Aid</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Sailing Aid</h1>
+
+  <section id="setup">
+    <h2>Setup</h2>
+    <label>Wind direction (deg):
+      <input id="windDir" type="number" value="0">
+    </label>
+    <label>True wind speed TWS (kt):
+      <input id="tws" type="number" value="10">
+    </label>
+    <label>Heel (deg):
+      <input id="heel" type="number" value="0">
+    </label>
+
+    <h3>Next mark</h3>
+    <label>Mark lat:
+      <input id="markLat" type="number">
+    </label>
+    <label>Mark lon:
+      <input id="markLon" type="number">
+    </label>
+
+    <button id="startBtn">Start tracking</button>
+  </section>
+
+  <section id="live">
+    <h2>Live</h2>
+    <p id="gpsStatus">GPS: not started</p>
+    <p id="boatInfo"></p>
+    <p id="markInfo"></p>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
