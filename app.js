@@ -1,0 +1,1 @@
+<html><head><meta content="text/html; charset=UTF-8" http-equiv="content-type"><title>Gmail - İndirme hatası</title></head><body>Bu türde dosyalar yürütülebilir dosyalara ve arşivlere yönelik Google politikasını ihlal ettiği için, Gmail güvenlik nedeniyle bunları kullanmanıza izin vermez.</body></html>
