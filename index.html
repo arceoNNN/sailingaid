@@ -11,14 +11,11 @@
 
   <section id="setup">
     <h2>Setup</h2>
-    <label>Wind direction (deg):
+    <label>Wind direction (deg, true):
       <input id="windDir" type="number" value="0">
     </label>
     <label>True wind speed TWS (kt):
       <input id="tws" type="number" value="10">
-    </label>
-    <label>Heel (deg):
-      <input id="heel" type="number" value="0">
     </label>
 
     <h3>Next mark</h3>
@@ -36,7 +33,11 @@
     <h2>Live</h2>
     <p id="gpsStatus">GPS: not started</p>
     <p id="boatInfo"></p>
+    <p id="headingInfo"></p>
+    <p id="speedInfo"></p>
+    <p id="vmgMarkInfo"></p>
     <p id="markInfo"></p>
+    <p id="vmgInfo"></p>
   </section>
 
   <script src="app.js"></script>
