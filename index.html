@@ -26,15 +26,49 @@
       </div>
     </label>
 
-    <h3>Next mark</h3>
-    <label>Mark lat:
-      <input id="markLat" type="number">
+    <h3>Next mark (single)</h3>
+    <label>Mark lat (decimal degrees):
+      <input id="markLat" type="number" step="0.00001">
     </label>
-    <label>Mark lon:
-      <input id="markLon" type="number">
+    <label>Mark lon (decimal degrees):
+      <input id="markLon" type="number" step="0.00001">
+    </label>
+
+    <h3>Gate (optional)</h3>
+    <label>
+      <input id="useGate" type="checkbox">
+      Use gate instead of single mark
+    </label>
+    <label>Gate left lat (decimal degrees):
+      <input id="gateLeftLat" type="number" step="0.00001">
+    </label>
+    <label>Gate left lon (decimal degrees):
+      <input id="gateLeftLon" type="number" step="0.00001">
+    </label>
+    <label>Gate right lat (decimal degrees):
+      <input id="gateRightLat" type="number" step="0.00001">
+    </label>
+    <label>Gate right lon (decimal degrees):
+      <input id="gateRightLon" type="number" step="0.00001">
     </label>
 
     <button id="startBtn">Start tracking</button>
+  </section>
+
+  <section id="converter">
+    <h2>Coordinate converter</h2>
+    <p class="hint">
+      Paste coordinates in formats like:<br>
+      <code>36°45.123'N</code> or <code>36 45.123 N</code> or <code>36.75205</code>.
+    </p>
+    <label>Lat (DMS / DM / decimal):
+      <input id="convLat" type="text" placeholder="e.g. 36°45.123'N">
+    </label>
+    <label>Lon (DMS / DM / decimal):
+      <input id="convLon" type="text" placeholder="e.g. 27°18.456'E">
+    </label>
+    <button type="button" onclick="convertCoords()">Convert → fill single mark</button>
+    <p id="convStatus" class="status"></p>
   </section>
 
   <section id="live">
@@ -46,6 +80,7 @@
     <p id="twaInfo"></p>
     <p id="vmgMarkInfo"></p>
     <p id="markInfo"></p>
+    <p id="laylineInfo"></p>
     <p id="vmgInfo"></p>
     <p id="speedPolarInfo"></p>
   </section>

@@ -2,6 +2,8 @@
 let watchId = null;
 let polars = null; // loaded from polars.json
 
+const BOAT_LENGTH_M = 35 * 0.3048; // 35 ft in meters
+
 function toRad(deg) { return deg * Math.PI / 180; }
 function toDeg(rad) { return rad * 180 / Math.PI; }
 
@@ -109,14 +111,41 @@ function getTargetBoatSpeed(tws, twa) {
   return spA0 + t * (spA1 - spA0);
 }
 
-function startTracking() {
-  if (!navigator.geolocation) {
-    document.getElementById('gpsStatus').textContent = 'Requesting GPS...';
+// Compute best downwind TWA for given TWS using polars
+function getBestDownwindAngle(tws) {
+  if (!polars || !polars.angles || !polars.speeds) return null;
 
+  const twsList = polars.tws;
+  const angles = polars.angles;
+  const speeds = polars.speeds;
+
+  let bestAngle = null;
+  let bestVMG = -Infinity;
+
+  for (let i = 0; i < angles.length; i++) {
+    const ang = angles[i]; // TWA
+    const arr = speeds[String(ang)];
+    if (!arr) continue;
+    const sp = interp1(tws, twsList, arr);
+    if (sp == null) continue;
+
+    // Projection toward downwind axis (TWA = 180)
+    const vmgDown = sp * Math.cos(toRad(180 - ang)); // >= 0 downwind
+    if (vmgDown > bestVMG) {
+      bestVMG = vmgDown;
+      bestAngle = ang;
+    }
+  }
+  return bestAngle;
+}
+
+function startTracking() {
   if (!navigator.geolocation) {
     document.getElementById('gpsStatus').textContent = 'GPS not supported';
     return;
   }
+
+  document.getElementById('gpsStatus').textContent = 'Requesting GPS...';
 
   // Ask for freshest possible GPS data; real rate still depends on hardware/OS
   watchId = navigator.geolocation.watchPosition(onPosition, onError, {
@@ -142,11 +171,9 @@ function onError(err) {
 }
 
 function updateLive(lat, lon, sog, cmg) {
-  // Position
   const boatInfo = document.getElementById('boatInfo');
   boatInfo.textContent = `Pos: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
 
-  // Heading & speed directly from GPS
   const headingInfo = document.getElementById('headingInfo');
   const speedInfo = document.getElementById('speedInfo');
   const twaInfo = document.getElementById('twaInfo');
@@ -157,29 +184,71 @@ function updateLive(lat, lon, sog, cmg) {
   speedInfo.textContent =
     `Speed over ground: ${sog != null ? sog.toFixed(2) + ' kt' : '–'}`;
 
-  // We'll fill TWA later once we know windDir
+  const useGate = document.getElementById('useGate').checked;
 
-  // Mark info & VMG to mark
-  const markLat = parseFloat(document.getElementById('markLat').value);
-  const markLon = parseFloat(document.getElementById('markLon').value);
   const markInfo = document.getElementById('markInfo');
   const vmgMarkInfo = document.getElementById('vmgMarkInfo');
+  const laylineInfo = document.getElementById('laylineInfo');
+
+  let activeLat = null;
+  let activeLon = null;
+  let activeLabel = '';
+
+  // Choose active mark: either single or nearest gate mark
+  const singleLat = parseFloat(document.getElementById('markLat').value);
+  const singleLon = parseFloat(document.getElementById('markLon').value);
+
+  const gateLeftLat = parseFloat(document.getElementById('gateLeftLat').value);
+  const gateLeftLon = parseFloat(document.getElementById('gateLeftLon').value);
+  const gateRightLat = parseFloat(document.getElementById('gateRightLat').value);
+  const gateRightLon = parseFloat(document.getElementById('gateRightLon').value);
+
+  let brgMark = null;
+  let dMark = null;
+
+  if (useGate) {
+    const candidates = [];
+    if (isFinite(gateLeftLat) && isFinite(gateLeftLon)) {
+      const bd = bearingAndDistance(lat, lon, gateLeftLat, gateLeftLon);
+      candidates.push({ label: 'gate L', lat: gateLeftLat, lon: gateLeftLon, bearing: bd.bearing, dist: bd.distance_m });
+    }
+    if (isFinite(gateRightLat) && isFinite(gateRightLon)) {
+      const bd = bearingAndDistance(lat, lon, gateRightLat, gateRightLon);
+      candidates.push({ label: 'gate R', lat: gateRightLat, lon: gateRightLon, bearing: bd.bearing, dist: bd.distance_m });
+    }
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => a.dist - b.dist);
+      const best = candidates[0];
+      activeLat = best.lat;
+      activeLon = best.lon;
+      activeLabel = best.label;
+      brgMark = best.bearing;
+      dMark = best.dist;
+    }
+  } else {
+    if (isFinite(singleLat) && isFinite(singleLon)) {
+      const bd = bearingAndDistance(lat, lon, singleLat, singleLon);
+      activeLat = singleLat;
+      activeLon = singleLon;
+      activeLabel = '';
+      brgMark = bd.bearing;
+      dMark = bd.distance_m;
+    }
+  }
 
   let vmgMark = null;
 
-  if (isFinite(markLat) && isFinite(markLon)) {
-    const { bearing: brgMark, distance_m: dMark } =
-      bearingAndDistance(lat, lon, markLat, markLon);
-
+  if (activeLat != null && activeLon != null && brgMark != null && dMark != null) {
+    const labelSuffix = activeLabel ? ` (${activeLabel})` : '';
     markInfo.textContent =
-      `To mark: brg ${brgMark.toFixed(0)}°, dist ${(dMark / 1852).toFixed(2)} NM`;
+      `To mark${labelSuffix}: brg ${brgMark.toFixed(0)}°, dist ${(dMark / 1852).toFixed(2)} NM`;
 
     if (sog != null && cmg != null) {
       const diff = smallestAngleDiff(cmg, brgMark);
       vmgMark = sog * Math.cos(toRad(diff)); // kn
     }
   } else {
-    markInfo.textContent = 'To mark: set mark coordinates above.';
+    markInfo.textContent = 'To mark: set mark or gate coordinates above.';
   }
 
   if (vmgMark != null) {
@@ -195,9 +264,9 @@ function updateLive(lat, lon, sog, cmg) {
   const windDirVal = parseFloat(document.getElementById('windDir').value);
   const twsVal = parseFloat(document.getElementById('tws').value);
 
-  // Reset colour classes
   vmgInfo.classList.remove('perf-good', 'perf-ok', 'perf-bad');
   speedPolarInfo.classList.remove('perf-good', 'perf-ok', 'perf-bad');
+  laylineInfo.textContent = 'Layline: –';
 
   if (!isFinite(windDirVal) || !isFinite(twsVal) || sog == null || cmg == null) {
     vmgInfo.textContent = 'VMG vs wind: waiting for wind, TWS and GPS...';
@@ -220,12 +289,10 @@ function updateLive(lat, lon, sog, cmg) {
   let mode, vmg, targetVMG;
 
   if (absUp <= 90) {
-    // Upwind sector
     mode = 'upwind';
     vmg = sog * Math.cos(toRad(absUp)); // projection on upwind axis
     targetVMG = getTargetVMG(twsVal, 'upwind');
   } else {
-    // Downwind sector
     const downDir = (windDir + 180) % 360;
     const diffToDown = smallestAngleDiff(cmg, downDir);
     const absDown = Math.abs(diffToDown);
@@ -270,6 +337,138 @@ function updateLive(lat, lon, sog, cmg) {
     speedPolarInfo.textContent =
       `Speed vs polar: ${sog != null ? sog.toFixed(2) + ' kt' : '–'} (no polar speed data for this TWS/TWA yet)`;
   }
+
+  // Layline distance & time: works for both upwind & downwind legs
+  if (activeLat != null && activeLon != null && brgMark != null && dMark != null && polars && Array.isArray(polars.tws)) {
+    const R = 6371000;
+    const latRad = toRad(lat);
+    const dLat = toRad(activeLat - lat);
+    const dLon = toRad(activeLon - lon);
+    const y_m = dLat * R; // north
+    const x_m = dLon * R * Math.cos(latRad); // east
+
+    if (mode === 'upwind' && Array.isArray(polars.beatAngle)) {
+      const beatAng = interp1(twsVal, polars.tws, polars.beatAngle);
+      if (beatAng != null) {
+        const diffMarkWind = Math.abs(smallestAngleDiff(brgMark, windDir));
+        if (diffMarkWind <= 100) {
+          const onStarboard = rawDiff > 0;
+          let brgLLDown;
+          if (onStarboard) {
+            brgLLDown = (windDir + beatAng + 180) % 360;
+          } else {
+            brgLLDown = (windDir - beatAng + 180 + 360) % 360;
+          }
+
+          const brgLLRad = toRad(brgLLDown);
+          const ux = Math.sin(brgLLRad);
+          const uy = Math.cos(brgLLRad);
+
+          const crossMark = x_m * uy - y_m * ux;
+          const dist_m = Math.abs(crossMark);
+          const bl = dist_m / BOAT_LENGTH_M;
+
+          const sog_mps = sog * 0.514444;
+          const diffLay = Math.abs(smallestAngleDiff(cmg, brgLLDown));
+          const lateralSpeed = sog_mps * Math.abs(Math.sin(toRad(diffLay)));
+          let ttlText = '–';
+
+          if (lateralSpeed > 0.01) {
+            const ttl_s = dist_m / lateralSpeed;
+            if (ttl_s < 90) {
+              ttlText = `${ttl_s.toFixed(0)} s`;
+            } else {
+              const mins = Math.floor(ttl_s / 60);
+              const secs = Math.round(ttl_s % 60);
+              ttlText = `${mins}m ${secs}s`;
+            }
+          }
+
+          const boatSign = Math.sign(-crossMark);
+          const windAxisRad = toRad(windDir);
+          const insideSign = Math.sign(Math.sin(windAxisRad) * uy - Math.cos(windAxisRad) * ux);
+
+          let sideText;
+          if (dist_m < 0.5 * BOAT_LENGTH_M) {
+            sideText = 'on layline';
+          } else if (boatSign === insideSign || insideSign === 0) {
+            sideText = `inside ${bl.toFixed(1)} BL`;
+          } else {
+            sideText = `overstood by ${bl.toFixed(1)} BL`;
+          }
+
+          const tackStr = onStarboard ? 'starboard' : 'port';
+          const gateSuffix = activeLabel ? ` (${activeLabel})` : '';
+          const ttlPart = sideText.startsWith('overstood') ? '' : `, ${ttlText}`;
+
+          laylineInfo.textContent =
+            `To ${tackStr} upwind layline${gateSuffix}: ${sideText}${ttlPart}`;
+        }
+      }
+    } else if (mode === 'downwind') {
+      const windDown = (windDir + 180) % 360;
+      const runAng = getBestDownwindAngle(twsVal);
+      if (runAng != null) {
+        const diffMarkDown = Math.abs(smallestAngleDiff(brgMark, windDown));
+        if (diffMarkDown <= 100) {
+          const beta = 180 - runAng;
+          const diffDownNow = smallestAngleDiff(cmg, windDown);
+          const onStarboardJibe = diffDownNow > 0;
+
+          let brgLLDown;
+          if (onStarboardJibe) {
+            brgLLDown = (windDown - beta + 180 + 360) % 360;
+          } else {
+            brgLLDown = (windDown + beta + 180) % 360;
+          }
+
+          const brgLLRad = toRad(brgLLDown);
+          const ux = Math.sin(brgLLRad);
+          const uy = Math.cos(brgLLRad);
+
+          const crossMark = x_m * uy - y_m * ux;
+          const dist_m = Math.abs(crossMark);
+          const bl = dist_m / BOAT_LENGTH_M;
+
+          const sog_mps = sog * 0.514444;
+          const diffLay = Math.abs(smallestAngleDiff(cmg, brgLLDown));
+          const lateralSpeed = sog_mps * Math.abs(Math.sin(toRad(diffLay)));
+          let ttlText = '–';
+
+          if (lateralSpeed > 0.01) {
+            const ttl_s = dist_m / lateralSpeed;
+            if (ttl_s < 90) {
+              ttlText = `${ttl_s.toFixed(0)} s`;
+            } else {
+              const mins = Math.floor(ttl_s / 60);
+              const secs = Math.round(ttl_s % 60);
+              ttlText = `${mins}m ${secs}s`;
+            }
+          }
+
+          const boatSign = Math.sign(-crossMark);
+          const windAxisRad = toRad(windDown);
+          const insideSign = Math.sign(Math.sin(windAxisRad) * uy - Math.cos(windAxisRad) * ux);
+
+          let sideText;
+          if (dist_m < 0.5 * BOAT_LENGTH_M) {
+            sideText = 'on layline';
+          } else if (boatSign === insideSign || insideSign === 0) {
+            sideText = `inside ${bl.toFixed(1)} BL`;
+          } else {
+            sideText = `overstood by ${bl.toFixed(1)} BL`;
+          }
+
+          const tackStr = onStarboardJibe ? 'starboard' : 'port';
+          const gateSuffix = activeLabel ? ` (${activeLabel})` : '';
+          const ttlPart = sideText.startsWith('overstood') ? '' : `, ${ttlText}`;
+
+          laylineInfo.textContent =
+            `To ${tackStr} downwind layline${gateSuffix}: ${sideText}${ttlPart}`;
+        }
+      }
+    }
+  }
 }
 
 function loadPolars() {
@@ -284,13 +483,90 @@ function loadPolars() {
     });
 }
 
+// Parse DMS / DM / decimal coordinate string into decimal degrees
+function parseCoordString(str, isLat) {
+  if (!str) return null;
+  let s = str.trim().toUpperCase();
+
+  let sign = 1;
+  if (s.includes('S') || s.includes('W')) {
+    sign = -1;
+  }
+  // Remove hemisphere letters
+  s = s.replace(/[NSEW]/g, ' ');
+
+  // Replace degree/minute/second symbols with spaces
+  s = s.replace(/[°º]/g, ' ');
+  s = s.replace(/[′']/g, ' ');
+  s = s.replace(/[″"]/g, ' ');
+
+  // Replace commas with dots
+  s = s.replace(/,/g, '.');
+
+  // Now split on whitespace
+  const parts = s.split(/\s+/).filter(p => p.length > 0);
+
+  let deg, min = 0, sec = 0;
+  if (parts.length === 1) {
+    // Decimal degrees
+    deg = parseFloat(parts[0]);
+    if (!isFinite(deg)) return null;
+  } else if (parts.length === 2) {
+    // Degrees + minutes
+    deg = parseFloat(parts[0]);
+    min = parseFloat(parts[1]);
+    if (!isFinite(deg) || !isFinite(min)) return null;
+  } else {
+    // Degrees + minutes + seconds (ignore extras if any)
+    deg = parseFloat(parts[0]);
+    min = parseFloat(parts[1]);
+    sec = parseFloat(parts[2]);
+    if (!isFinite(deg) || !isFinite(min) || !isFinite(sec)) return null;
+  }
+
+  let dec = Math.abs(deg) + (Math.abs(min) / 60) + (Math.abs(sec) / 3600);
+  dec *= (deg < 0 ? -1 : 1); // keep explicit negative sign if typed
+  dec *= sign; // apply hemisphere
+
+  // Basic sanity checks
+  if (isLat && (dec < -90 || dec > 90)) return null;
+  if (!isLat && (dec < -180 || dec > 180)) return null;
+
+  return dec;
+}
+
+function convertCoords() {
+  const latStr = document.getElementById('convLat').value;
+  const lonStr = document.getElementById('convLon').value;
+  const statusEl = document.getElementById('convStatus');
+
+  statusEl.classList.remove('status-ok', 'status-error');
+
+  const lat = parseCoordString(latStr, true);
+  const lon = parseCoordString(lonStr, false);
+
+  if (lat == null || lon == null) {
+    statusEl.textContent = 'Could not parse one or both coordinates. Check format.';
+    statusEl.classList.add('status-error');
+    return;
+  }
+
+  const markLatInput = document.getElementById('markLat');
+  const markLonInput = document.getElementById('markLon');
+
+  markLatInput.value = lat.toFixed(5);
+  markLonInput.value = lon.toFixed(5);
+
+  statusEl.textContent = `Converted: lat ${lat.toFixed(5)}, lon ${lon.toFixed(5)} (decimal degrees).`;
+  statusEl.classList.add('status-ok');
+}
+
 // +/- helpers for wind direction and TWS
 function adjustWindDir(delta) {
   const input = document.getElementById('windDir');
   let val = parseFloat(input.value);
   if (!isFinite(val)) val = 0;
   val += delta;
-  // normalize to 0–359
   val = ((val % 360) + 360) % 360;
   input.value = val.toFixed(0);
 }
