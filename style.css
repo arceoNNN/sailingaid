@@ -69,27 +69,18 @@ p {
   font-size: 0.9rem;
 }
 
+#optimalInfo {
+  font-weight: 650;
+}
+
 /* Performance colour coding for VMG vs wind and speed vs polar */
 #vmgInfo, #speedPolarInfo {
   font-weight: 600;
 }
 
-.perf-good {
-  color: #008000; /* green */
-}
+.perf-good { color: #008000; }
+.perf-ok { color: #c09000; }
+.perf-bad { color: #b00020; }
 
-.perf-ok {
-  color: #c09000; /* amber-ish */
-}
-
-.perf-bad {
-  color: #b00020; /* red */
-}
-
-.status-ok {
-  color: #006600;
-}
-
-.status-error {
-  color: #b00020;
-}
+.status-ok { color: #006600; }
+.status-error { color: #b00020; }
