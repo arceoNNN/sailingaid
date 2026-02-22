@@ -11,11 +11,11 @@
 
   <section id="setup">
     <h2>Setup</h2>
-    <label>Wind direction (deg, true):
+    <label>Apparent wind angle AWA (deg, +stbd / −port):
       <div class="field-with-buttons">
-        <button type="button" onclick="adjustWindDir(-1)">−</button>
-        <input id="windDir" type="number" value="0" step="1">
-        <button type="button" onclick="adjustWindDir(1)">+</button>
+        <button type="button" onclick="adjustAWA(-1)">−</button>
+        <input id="awa" type="number" value="30" step="1">
+        <button type="button" onclick="adjustAWA(1)">+</button>
       </div>
     </label>
     <label>True wind speed TWS (kt):

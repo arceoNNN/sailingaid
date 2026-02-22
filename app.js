@@ -29,6 +29,79 @@ function bearingAndDistance(lat1, lon1, lat2, lon2) {
   return { bearing: brg, distance_m: d };
 }
 
+function normSigned180(deg) {
+  // normalize to (-180, 180]
+  let d = ((deg + 180) % 360 + 360) % 360 - 180;
+  if (d === -180) d = 180;
+  return d;
+}
+
+function solveTWAFromAWA(awa_from_deg, tws, boatSpeed) {
+  // Inputs:
+  // - awa_from_deg: apparent wind angle (wind FROM) relative to boat heading, signed (+stbd / -port)
+  // - tws: true wind speed (kt)
+  // - boatSpeed: boat speed (kt). We use SOG as approximation.
+  // Output:
+  // - twa_from_deg: true wind angle (wind FROM) relative to boat heading, signed (+stbd / -port)
+  //
+  // Method: search over possible TWA_to angles to match the AWA_to direction of (W_true_to - V_boat).
+  if (!isFinite(awa_from_deg) || !isFinite(tws) || !isFinite(boatSpeed) || tws <= 0) return null;
+
+  // Convert FROM to TO in boat coordinates
+  const awa_to = normSigned180(awa_from_deg + 180);
+  const target = toRad(awa_to);
+
+  const bs = Math.max(0, boatSpeed);
+  const ws = tws;
+
+  const sign = (awa_to === 0) ? 1 : Math.sign(awa_to);
+
+  function awa_to_from_twa_to(phi) {
+    // phi = TWA_to (radians, signed)
+    // Apparent wind TO vector = True wind TO vector - boat velocity vector (forward)
+    const x = ws * Math.cos(phi) - bs;
+    const y = ws * Math.sin(phi);
+    return Math.atan2(y, x); // -pi..pi
+  }
+
+  // Coarse search (1 deg)
+  let bestPhi = null;
+  let bestErr = 1e9;
+  for (let deg = 1; deg <= 179; deg += 1) {
+    const phi = toRad(sign * deg);
+    const est = awa_to_from_twa_to(phi);
+    let err = est - target;
+    err = (err + Math.PI) % (2 * Math.PI) - Math.PI;
+    const aerr = Math.abs(err);
+    if (aerr < bestErr) {
+      bestErr = aerr;
+      bestPhi = phi;
+    }
+  }
+  if (bestPhi == null) return null;
+
+  // Refine around best (0.1 deg)
+  const bestDeg = Math.abs(toDeg(bestPhi));
+  let bestPhi2 = bestPhi;
+  let bestErr2 = bestErr;
+  for (let d = Math.max(0.1, bestDeg - 2); d <= Math.min(179, bestDeg + 2); d += 0.1) {
+    const phi = toRad(sign * d);
+    const est = awa_to_from_twa_to(phi);
+    let err = est - target;
+    err = (err + Math.PI) % (2 * Math.PI) - Math.PI;
+    const aerr = Math.abs(err);
+    if (aerr < bestErr2) {
+      bestErr2 = aerr;
+      bestPhi2 = phi;
+    }
+  }
+
+  // Convert TWA_to to TWA_from
+  const twa_to_deg = toDeg(bestPhi2);
+  const twa_from_deg = normSigned180(twa_to_deg - 180);
+  return twa_from_deg;
+}
+
 function smallestAngleDiff(a, b) {
   return (a - b + 540) % 360 - 180; // -180..180
 }
@@ -219,12 +292,13 @@ function updateLive(lat, lon, sog, cmg) {
 
   vmgMarkInfo.textContent = (vmgMark != null) ? `VMG to mark: ${vmgMark.toFixed(2)} kt` : 'VMG to mark: –';
 
-  const windDirVal = parseFloat(document.getElementById('windDir').value);
-  const twsVal = parseFloat(document.getElementById('tws').value);
+  const awaVal = parseFloat(document.getElementById('awa').value);
+const twsVal = parseFloat(document.getElementById('tws').value);
 
   // Optimal heading/speed to the mark: all-purpose (handles reaching too)
-  if (isFinite(windDirVal) && isFinite(twsVal) && brgMark != null) {
-    const windDir = norm360(windDirVal);
+  if (isFinite(awaVal) && isFinite(twsVal) && brgMark != null) {
+    const twaFrom = solveTWAFromAWA(awaVal, twsVal, (sog != null ? sog : 0));
+    const windDir = (twaFrom != null && cmg != null) ? norm360(cmg + twaFrom) : null;
     const opt = computeOptimalToMarkGeneral(brgMark, windDir, twsVal);
     const gateSuffix = activeLabel ? ` (${activeLabel})` : '';
     if (opt) {
@@ -246,22 +320,29 @@ function updateLive(lat, lon, sog, cmg) {
   speedPolarInfo.classList.remove('perf-good', 'perf-ok', 'perf-bad');
   laylineInfo.textContent = 'Layline: –';
 
-  if (!isFinite(windDirVal) || !isFinite(twsVal) || sog == null || cmg == null) {
+  if (!isFinite(awaVal) || !isFinite(twsVal) || sog == null || cmg == null) {
     vmgInfo.textContent = 'VMG vs wind: waiting for wind, TWS and GPS...';
     speedPolarInfo.textContent = 'Speed vs polar: waiting for wind, TWS and GPS...';
     twaInfo.textContent = 'TWA: –';
     return;
   }
 
-  const windDir = norm360(windDirVal);
+  const twaFrom = solveTWAFromAWA(awaVal, twsVal, (sog != null ? sog : 0));
+    const windDir = (twaFrom != null && cmg != null) ? norm360(cmg + twaFrom) : null;
+  if (windDir == null) {
+    vmgInfo.textContent = 'VMG vs wind: need AWA + TWS + GPS heading/speed...';
+    speedPolarInfo.textContent = 'Speed vs polar: need AWA + TWS + GPS heading/speed...';
+    twaInfo.textContent = 'AWA/TWA: –';
+    laylineInfo.textContent = 'Layline: –';
+    return;
+  }
 
   // Current TWA (0..180)
   let rawDiff = smallestAngleDiff(cmg, windDir);
   let twa = Math.abs(rawDiff);
   if (twa > 180) twa = 360 - twa;
-  twaInfo.textContent = `TWA (approx): ${twa.toFixed(0)}°`;
-
-  // Upwind vs downwind for VMG vs wind display
+  twaInfo.textContent = `AWA: ${awaVal.toFixed(0)}° | TWA (est): ${rawDiff.toFixed(0)}°`;
+// Upwind vs downwind for VMG vs wind display
   const absUp = Math.abs(rawDiff);
   let mode, vmg, targetVMG;
 
@@ -462,12 +543,14 @@ function convertCoords() {
 }
 
 // +/- helpers for wind direction and TWS
-function adjustWindDir(delta) {
-  const input = document.getElementById('windDir');
+function adjustAWA(delta) {
+  const input = document.getElementById('awa');
   let val = parseFloat(input.value);
   if (!isFinite(val)) val = 0;
-  input.value = norm360(val + delta).toFixed(0);
+  val = normSigned180(val + delta);
+  input.value = val.toFixed(0);
 }
+
 function adjustTWS(delta) {
   const input = document.getElementById('tws');
   let val = parseFloat(input.value);
